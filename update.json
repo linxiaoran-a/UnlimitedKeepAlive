@@ -1,6 +1,6 @@
 {
-  "version": "v3.3",
-  "versionCode": 19,
-  "zipUrl": "https://github.com/linxiaoran-a/UnlimitedKeepAlive/releases/download/v3.3/UnlimitedKeepAlive-KSU-v3.3.zip",
-  "changelog": "https://raw.githubusercontent.com/linxiaoran-a/UnlimitedKeepAlive/main/changelog.md"
+  "version": "v0.1.0",
+  "versionCode": 1,
+  "zipUrl": "https://gitee.com/lin_xiaoran/UnlimitedKeepAlive/releases/download/v0.1.0/UnlimitedKeepAlive-KSU-v0.1.0.zip",
+  "changelog": "https://gitee.com/lin_xiaoran/UnlimitedKeepAlive/releases/tag/v0.1.0"
 }
