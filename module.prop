@@ -1,0 +1,8 @@
+id=unlimited_keepalive
+name=UnlimitedKeepAlive
+version=v3.4
+versionCode=20
+author=林小冉
+description=应用后台保活（主空间+全部分身独立生效）：可选冻结PowerKeeper、doze白名单、EXEMPTED豁免桶、appops放行、周期补刷守护；模块操作按钮进入原生设置界面（应用图标+搜索+分身切换），修改即生效。测试机型：Redmi K70 澎湃OS 3.x
+updateJson=https://raw.githubusercontent.com/linxiaoran-a/UnlimitedKeepAlive/main/update.json
+actionIcon=settings
