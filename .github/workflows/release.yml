@@ -91,6 +91,12 @@ jobs:
         run: |
           set -e -o pipefail
           export ANDROID_SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          # APK 版本号跟随模块版本，修复安装后一直显示 1.0(1) 的问题
+          V="$(sed -n 's/^version=//p' module.prop)"; V="${V#v}"
+          C="$(sed -n 's/^versionCode=//p' module.prop)"
+          sed -i "s/android:versionCode=\"[^\"]*\"/android:versionCode=\"$C\"/" AndroidManifest.xml
+          sed -i "s/android:versionName=\"[^\"]*\"/android:versionName=\"$V\"/" AndroidManifest.xml
+          grep -o 'android:version[^ ]*' AndroidManifest.xml | head -2
           if [ -f debug.keystore ]; then mkdir -p build; cp debug.keystore build/debug.keystore; fi
           bash -x build_apk.sh 2>&1 | tee "$RUNNER_TEMP/build.log"
           cp build/debug.keystore debug.keystore

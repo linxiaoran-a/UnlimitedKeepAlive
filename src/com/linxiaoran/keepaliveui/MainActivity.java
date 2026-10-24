@@ -240,6 +240,8 @@ public class MainActivity extends Activity {
                     refreshProtectList();
                 });
                 renderAppRows();
+                // 应用列表加载完才有应用名可查，重刷保护列表的显示
+                refreshProtectList();
                 if (err != null) toast("加载应用列表失败: " + err);
             }
         }.execute();
@@ -259,10 +261,22 @@ public class MainActivity extends Activity {
             LinearLayout row = new LinearLayout(this);
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
-            TextView tv = new TextView(this);
-            tv.setText(pkg);
-            tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-            row.addView(tv, new LinearLayout.LayoutParams(0, -2, 1));
+            LinearLayout texts = new LinearLayout(this);
+            texts.setOrientation(LinearLayout.VERTICAL);
+            row.addView(texts, new LinearLayout.LayoutParams(0, -2, 1));
+            String label = null;
+            for (Ctl.AppInfo a : curApps) {
+                if (pkg.equals(a.pkg)) { label = a.label; break; }
+            }
+            TextView tvName = new TextView(this);
+            tvName.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+            tvName.setText(label != null && !label.isEmpty() ? label : pkg);
+            texts.addView(tvName, new LinearLayout.LayoutParams(-1, -2));
+            TextView tvPkg = new TextView(this);
+            tvPkg.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+            tvPkg.setTextColor(Color.GRAY);
+            tvPkg.setText(pkg);
+            texts.addView(tvPkg, new LinearLayout.LayoutParams(-1, -2));
             Button btnRm = new Button(this);
             btnRm.setText("移除");
             btnRm.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
