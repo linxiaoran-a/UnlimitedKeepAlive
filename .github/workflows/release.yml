@@ -1,0 +1,98 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '新版本号（如 v3.5），留空则自动在最后一位 +1'
+        required: false
+        default: ''
+      changelog:
+        description: '更新说明（写进 Release 正文）'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 计算新版本号并写回 module.prop
+        id: ver
+        env:
+          INPUT_VER: ${{ github.event.inputs.version }}
+        run: |
+          set -e
+          cur=$(sed -n 's/^version=//p' module.prop)
+          code=$(sed -n 's/^versionCode=//p' module.prop)
+          if [ -n "$INPUT_VER" ]; then
+            new="v${INPUT_VER#v}"
+          else
+            base="${cur#v}"
+            IFS='.' read -r -a parts <<< "$base"
+            last=$(( ${#parts[@]} - 1 ))
+            parts[$last]=$(( parts[$last] + 1 ))
+            new="v$(IFS='.'; echo "${parts[*]}")"
+          fi
+          newcode=$((code + 1))
+          sed -i "s/^version=.*/version=$new/" module.prop
+          sed -i "s/^versionCode=.*/versionCode=$newcode/" module.prop
+          echo "version=$new" >> "$GITHUB_OUTPUT"
+          echo "versionCode=$newcode" >> "$GITHUB_OUTPUT"
+
+      - name: 打包模块 zip（pack.ps1 的 Linux 版）
+        run: |
+          set -e
+          VER="${{ steps.ver.outputs.version }}"
+          rm -rf build UnlimitedKeepAlive-KSU-*.zip
+          out=build/unlimited_keepalive
+          mkdir -p "$out/tools" "$out/webroot"
+          cp module.prop config.sh keepalive.sh service.sh uninstall.sh webui_ctl.sh "$out/"
+          if [ -f action.sh ]; then cp action.sh "$out/"; fi
+          cp tools/icedump.dex "$out/tools/"
+          if [ -f webroot/index.html ]; then
+            cp webroot/index.html "$out/webroot/"
+          else
+            echo "::warning::仓库里没有 webroot/index.html，本次打包跳过了它"
+          fi
+          ( cd "$out" && zip -r9 "$GITHUB_WORKSPACE/UnlimitedKeepAlive-KSU-$VER.zip" . )
+          ls -l "UnlimitedKeepAlive-KSU-$VER.zip"
+
+      - name: 更新 update.json 指向新版本
+        run: |
+          VER="${{ steps.ver.outputs.version }}"
+          CODE="${{ steps.ver.outputs.versionCode }}"
+          cat > update.json <<EOF
+          {
+            "version": "$VER",
+            "versionCode": $CODE,
+            "zipUrl": "https://github.com/linxiaoran-a/UnlimitedKeepAlive/releases/download/$VER/UnlimitedKeepAlive-KSU-$VER.zip",
+            "changelog": "https://github.com/linxiaoran-a/UnlimitedKeepAlive/releases/tag/$VER"
+          }
+          EOF
+
+      - name: 提交版本号并打 tag
+        run: |
+          set -e
+          VER="${{ steps.ver.outputs.version }}"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add module.prop update.json
+          git commit -m "release: $VER"
+          git tag "$VER"
+          git push origin HEAD --tags
+
+      - name: 发布 Release（模块 zip + APK）
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.version }}
+          name: UnlimitedKeepAlive ${{ steps.ver.outputs.version }}
+          body: ${{ github.event.inputs.changelog || '在线自动打包发布，更新说明见 changelog.md' }}
+          files: |
+            UnlimitedKeepAlive-KSU-*.zip
+            UnlimitedKeepAlive.apk
+            UnlimitedKeepAlive.apk.idsig
