@@ -118,21 +118,29 @@ public class Ctl {
     }
 
     private static List<String> extractPkgList(String json) {
+        // pkgs 数组内每个条目又嵌套 "detail":[...] 数组，
+        // 不能用 indexOf(']') 找结尾（那会截在第一个 detail 上，
+        // 导致无论配置多少个包都只显示第一个）。必须按括号深度配平。
         List<String> list = new ArrayList<>();
         String pat = "\"pkgs\":[";
         int i = json.indexOf(pat);
         if (i < 0) return list;
-        int j = json.indexOf(']', i);
-        if (j < 0) return list;
-        String body = json.substring(i + pat.length(), j);
-        for (String item : body.split("\\},\\{")) {
-            String p = "\"pkg\":\"";
-            int k = item.indexOf(p);
-            if (k >= 0) {
-                k += p.length();
-                int e = item.indexOf('"', k);
-                if (e > k) list.add(item.substring(k, e));
-            }
+        int depth = 1;
+        int j = i + pat.length();
+        while (j < json.length() && depth > 0) {
+            char c = json.charAt(j);
+            if (c == '[') depth++;
+            else if (c == ']') depth--;
+            j++;
+        }
+        String body = json.substring(i + pat.length(), j - 1);
+        String p = "\"pkg\":\"";
+        int k = 0;
+        while ((k = body.indexOf(p, k)) >= 0) {
+            int s = k + p.length();
+            int e = body.indexOf('"', s);
+            if (e > s) list.add(body.substring(s, e));
+            k = e + 1;
         }
         return list;
     }
