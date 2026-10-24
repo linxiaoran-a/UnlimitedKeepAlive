@@ -15,6 +15,7 @@ import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.ListAdapter;
 import android.widget.ListView;
 import android.widget.ScrollView;
 import android.widget.Spinner;
@@ -133,7 +134,9 @@ public class MainActivity extends Activity {
         root.addView(rowUser, new LinearLayout.LayoutParams(-1, -2));
 
         listApps = new ListView(this);
-        LinearLayout.LayoutParams listLp = new LinearLayout.LayoutParams(-1, 0, 1);
+        // 外层是 ScrollView：weight 在无限高容器里分不到空间，列表会塌成一条，
+        // 必须 wrap_content + 按条目实际高度撑开（见 expandListHeight）。
+        LinearLayout.LayoutParams listLp = new LinearLayout.LayoutParams(-1, -2);
         listLp.setMargins(0, dp(8), 0, 0);
         root.addView(listApps, listLp);
 
@@ -238,9 +241,27 @@ public class MainActivity extends Activity {
                     refreshProtectList();
                 });
                 listApps.setAdapter(adapter);
+                expandListHeight();
                 if (err != null) toast("加载应用列表失败: " + err);
             }
         }.execute();
+    }
+
+    private void expandListHeight() {
+        ListAdapter a = listApps.getAdapter();
+        if (a == null) return;
+        int widthSpec = View.MeasureSpec.makeMeasureSpec(
+                getResources().getDisplayMetrics().widthPixels - dp(32), View.MeasureSpec.EXACTLY);
+        int heightSpec = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED);
+        int total = 0;
+        for (int i = 0; i < a.getCount(); i++) {
+            View item = a.getView(i, null, listApps);
+            item.measure(widthSpec, heightSpec);
+            total += item.getMeasuredHeight();
+        }
+        LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) listApps.getLayoutParams();
+        lp.height = total;
+        listApps.setLayoutParams(lp);
     }
 
     private void refreshProtectList() {

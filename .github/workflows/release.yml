@@ -1,10 +1,12 @@
 name: Release
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       version:
-        description: '新版本号（如 v3.5），留空则自动在最后一位 +1'
+        description: '新版本号（如 v3.6），留空则自动在最后一位 +1'
         required: false
         default: ''
       changelog:
@@ -17,11 +19,25 @@ permissions:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v4
+
+      - name: 安装 SDK 组件
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "build-tools;34.0.0" "platforms;android-34"
+
+      # ↓↓↓ 发版时先递增版本号，模块 zip/APK 都会带上新版本
       - name: 计算新版本号并写回 module.prop
+        if: github.event_name == 'workflow_dispatch'
         id: ver
         env:
           INPUT_VER: ${{ github.event.inputs.version }}
@@ -47,7 +63,7 @@ jobs:
       - name: 打包模块 zip（pack.ps1 的 Linux 版）
         run: |
           set -e
-          VER="${{ steps.ver.outputs.version }}"
+          VER=$(sed -n 's/^version=//p' module.prop)
           rm -rf build UnlimitedKeepAlive-KSU-*.zip
           out=build/unlimited_keepalive
           mkdir -p "$out/tools" "$out/webroot"
@@ -62,37 +78,62 @@ jobs:
           ( cd "$out" && zip -r9 "$GITHUB_WORKSPACE/UnlimitedKeepAlive-KSU-$VER.zip" . )
           ls -l "UnlimitedKeepAlive-KSU-$VER.zip"
 
-      - name: 更新 update.json 指向新版本
+      - name: 编译设置界面 APK（build_apk.sh）
         run: |
-          VER="${{ steps.ver.outputs.version }}"
-          CODE="${{ steps.ver.outputs.versionCode }}"
+          set -e -o pipefail
+          export ANDROID_SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          if [ -f debug.keystore ]; then mkdir -p build; cp debug.keystore build/debug.keystore; fi
+          bash -x build_apk.sh 2>&1 | tee "$RUNNER_TEMP/build.log"
+          cp build/debug.keystore debug.keystore
+          ls -l UnlimitedKeepAlive.apk
+
+      - name: 失败时把构建日志推到 diag 分支（免登录排查用）
+        if: failure()
+        run: |
+          set -e
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B diag
+          { echo "run: $GITHUB_RUN_URL"; echo "---- build.log tail ----"; tail -n 150 "$RUNNER_TEMP/build.log" 2>/dev/null || echo "(no build log)"; } > build-failure.log
+          git add build-failure.log
+          git commit -m "diag: build failure log run #$GITHUB_RUN_NUMBER"
+          git push -f origin diag
+
+      # ↓↓↓ 以下步骤只在手动触发（正式发版）时执行
+      - name: 更新 update.json 指向新版本
+        if: github.event_name == 'workflow_dispatch'
+        run: |
           cat > update.json <<EOF
           {
-            "version": "$VER",
-            "versionCode": $CODE,
-            "zipUrl": "https://github.com/linxiaoran-a/UnlimitedKeepAlive/releases/download/$VER/UnlimitedKeepAlive-KSU-$VER.zip",
-            "changelog": "https://github.com/linxiaoran-a/UnlimitedKeepAlive/releases/tag/$VER"
+            "version": "${{ steps.ver.outputs.version }}",
+            "versionCode": ${{ steps.ver.outputs.versionCode }},
+            "zipUrl": "https://github.com/linxiaoran-a/UnlimitedKeepAlive/releases/download/${{ steps.ver.outputs.version }}/UnlimitedKeepAlive-KSU-${{ steps.ver.outputs.version }}.zip",
+            "changelog": "https://github.com/linxiaoran-a/UnlimitedKeepAlive/releases/tag/${{ steps.ver.outputs.version }}"
           }
           EOF
 
       - name: 提交版本号并打 tag
+        if: github.event_name == 'workflow_dispatch'
         run: |
           set -e
           VER="${{ steps.ver.outputs.version }}"
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add module.prop update.json
+          git add module.prop update.json debug.keystore
           git commit -m "release: $VER"
           git tag "$VER"
           git push origin HEAD --tags
 
       - name: 发布 Release（模块 zip + APK）
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.ver.outputs.version }}
-          name: UnlimitedKeepAlive ${{ steps.ver.outputs.version }}
-          body: ${{ github.event.inputs.changelog || '在线自动打包发布，更新说明见 changelog.md' }}
-          files: |
-            UnlimitedKeepAlive-KSU-*.zip
-            UnlimitedKeepAlive.apk
-            UnlimitedKeepAlive.apk.idsig
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTES: ${{ github.event.inputs.changelog }}
+        run: |
+          set -e
+          VER="${{ steps.ver.outputs.version }}"
+          if [ -z "$NOTES" ]; then NOTES="修复设置界面底部应用列表滚动区域塌陷；APK 改为云端源码构建。详见 changelog.md"; fi
+          gh release create "$VER" \
+            --title "UnlimitedKeepAlive $VER" \
+            --notes "$NOTES" \
+            UnlimitedKeepAlive-KSU-*.zip UnlimitedKeepAlive.apk
