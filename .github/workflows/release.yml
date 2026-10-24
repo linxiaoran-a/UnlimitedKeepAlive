@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: '新版本号（如 v3.6），留空则自动在最后一位 +1'
+        description: '新版本号（如 v3.7），留空则按最新 tag 自动 +1'
         required: false
         default: ''
       changelog:
@@ -22,6 +22,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0   # 完整历史 + tag：版本号从最新 tag 推算
 
       - uses: actions/setup-java@v5
         with:
@@ -35,7 +37,7 @@ jobs:
           yes | sdkmanager --licenses > /dev/null || true
           sdkmanager "build-tools;34.0.0" "platforms;android-34"
 
-      # ↓↓↓ 发版时先递增版本号，模块 zip/APK 都会带上新版本
+      # 版本号以最新 tag 为准（main 可能被 gitee 镜像强推回滚，不可信）
       - name: 计算新版本号并写回 module.prop
         if: github.event_name == 'workflow_dispatch'
         id: ver
@@ -43,12 +45,19 @@ jobs:
           INPUT_VER: ${{ github.event.inputs.version }}
         run: |
           set -e
-          cur=$(sed -n 's/^version=//p' module.prop)
-          code=$(sed -n 's/^versionCode=//p' module.prop)
+          git fetch --tags -q origin
+          LATEST=$(git tag -l 'v*' | sort -V | tail -1)
+          if [ -n "$LATEST" ]; then
+            base="${LATEST#v}"
+            code=$(git show "$LATEST:module.prop" | sed -n 's/^versionCode=//p')
+            [ -z "$code" ] && code=$(sed -n 's/^versionCode=//p' module.prop)
+          else
+            base=$(sed -n 's/^version=//p' module.prop); base="${base#v}"
+            code=$(sed -n 's/^versionCode=//p' module.prop)
+          fi
           if [ -n "$INPUT_VER" ]; then
             new="v${INPUT_VER#v}"
           else
-            base="${cur#v}"
             IFS='.' read -r -a parts <<< "$base"
             last=$(( ${#parts[@]} - 1 ))
             parts[$last]=$(( parts[$last] + 1 ))
@@ -99,8 +108,8 @@ jobs:
           git commit -m "diag: build failure log run #$GITHUB_RUN_NUMBER"
           git push -f origin diag
 
-      # ↓↓↓ 以下步骤只在手动触发（正式发版）时执行
-      - name: 更新 update.json 指向新版本
+      # 以下仅在手动发版时执行；只推 tag，不提交 main（避免被 gitee 镜像强推回滚吞掉）
+      - name: 生成 update.json
         if: github.event_name == 'workflow_dispatch'
         run: |
           cat > update.json <<EOF
@@ -112,19 +121,15 @@ jobs:
           }
           EOF
 
-      - name: 提交版本号并打 tag
+      - name: 打 tag 并推送（只推 tag）
         if: github.event_name == 'workflow_dispatch'
         run: |
           set -e
           VER="${{ steps.ver.outputs.version }}"
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add module.prop update.json debug.keystore
-          git commit -m "release: $VER"
           git tag "$VER"
-          git push origin HEAD --tags
+          git push origin "$VER"
 
-      - name: 发布 Release（模块 zip + APK）
+      - name: 发布 Release（模块 zip + APK + update.json）
         if: github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -132,8 +137,8 @@ jobs:
         run: |
           set -e
           VER="${{ steps.ver.outputs.version }}"
-          if [ -z "$NOTES" ]; then NOTES="修复设置界面底部应用列表滚动区域塌陷；APK 改为云端源码构建。详见 changelog.md"; fi
+          if [ -z "$NOTES" ]; then NOTES="本次更新见 changelog.md"; fi
           gh release create "$VER" \
             --title "UnlimitedKeepAlive $VER" \
             --notes "$NOTES" \
-            UnlimitedKeepAlive-KSU-*.zip UnlimitedKeepAlive.apk
+            UnlimitedKeepAlive-KSU-*.zip UnlimitedKeepAlive.apk update.json
